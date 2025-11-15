@@ -168,7 +168,7 @@ function loadTelegramLoginScript() {
 
 function apiCall(user_data) {
 
-    let apiUrl = 'https://europe-west3-lizaalert-bot-01.cloudfunctions.net/user_provide_info';
+    let apiUrl = 'https://functions.yandexcloud.net/d4ei2035u6c04civhodk';
 
     // Preflight request
     let preflightHeaders;
