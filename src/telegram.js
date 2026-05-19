@@ -168,7 +168,7 @@ function loadTelegramLoginScript() {
 
 function apiCall(user_data) {
 
-    let apiUrl = 'https://functions.yandexcloud.net/d4ei2035u6c04civhodk';
+    let apiUrl = 'https://functions.yandexcloud.net/d4edj61cbrdfi15mvvaq';
 
     // Preflight request
     let preflightHeaders;
