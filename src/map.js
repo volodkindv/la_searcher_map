@@ -443,6 +443,23 @@ function convertCoordsStringToArray(coordsString) {
     }
 }
 
+/**
+ * Extracts all polygon rings from a region's coordinate array.
+ * A single polygon has structure: [[[lat,lon], ...]] — returns one ring.
+ * A multi-polygon has structure: [[[lat,lon], ...], [[lat,lon], ...], ...] — returns multiple rings.
+ * Returns an array of rings, where each ring is an array of [lat, lon] pairs.
+ */
+function extractAllRings(coordsArray) {
+    // Check if this is a multi-polygon (multiple separate rings)
+    // by verifying that coordsArray[0][0] is a coordinate pair (not a ring)
+    if (coordsArray.length > 1 && Array.isArray(coordsArray[0][0])) {
+        // Multiple rings — return each as a separate ring
+        return coordsArray;
+    }
+    // Single polygon — return the single ring wrapped in an array
+    return [coordsArray[0]];
+}
+
 async function defineRegionsMultiPolygon() {
 
     const csvPath = 'regions_from_yandex.csv';
@@ -450,34 +467,29 @@ async function defineRegionsMultiPolygon() {
     await fetch(csvPath)
         .then(response => response.text())
         .then(csvText => {
-            let firstRegion = true;
+            let allRings = [];
+
             userRegionIdsList.forEach(regionId => {
+
+                console.log("user region id: ", regionId)
                 regionRecordInCSV = findRecordById(csvText, regionId);
                 const regionCoordinatesListInCSV = convertCoordsStringToArray(regionRecordInCSV.coords);
-                listOfRegionObjects.push(turf.polygon(regionCoordinatesListInCSV))
-
-                if (firstRegion === true) {
-                    unitedUserRegionsMultiPolygon = turf.polygon(regionCoordinatesListInCSV)
-                } else {
-                    unitedUserRegionsMultiPolygon = turf.union(unitedUserRegionsMultiPolygon, turf.polygon(regionCoordinatesListInCSV))
-                }
-                firstRegion = false
-
-                // deactivated as we're not showing it to user
-                /*regionCoordinatesListInCSV.forEach(singlePolygon => {
-
-                  const polygonFeature = new ymaps.GeoObject({
-                    geometry: {
-                      type: "Polygon",
-                      coordinates: [singlePolygon]
-                    }
-                  }, {
-                      fillColor: "#66ff99",
-                    }
-                  )
-                  //map.geoObjects.add(polygonFeature);
-                })*/
+                const rings = extractAllRings(regionCoordinatesListInCSV);
+                rings.forEach(ring => {
+                    listOfRegionObjects.push(turf.polygon([ring]));
+                });
+                allRings = allRings.concat(rings);
             })
+
+            // Build a single MultiPolygon from all rings (avoids turf.union() which
+            // cannot handle MultiPolygon inputs in this turf version)
+            if (allRings.length === 1) {
+                unitedUserRegionsMultiPolygon = turf.polygon([allRings[0]]);
+            } else {
+                // Wrap each ring in its own polygon array for MultiPolygon format
+                const multiPolygonCoords = allRings.map(ring => [ring]);
+                unitedUserRegionsMultiPolygon = turf.multiPolygon(multiPolygonCoords);
+            }
 
         })
         .catch(error => {
@@ -489,6 +501,11 @@ async function defineRegionsMultiPolygon() {
 function createPolygonForTurf() {
 
     console.log('userActiveArea', userActiveArea)
+
+    if (!userActiveArea) {
+        polygonForTurf = null;
+        return;
+    }
 
     if (userActiveArea.geometry.type === "MultiPolygon") {
         polygonForTurf = userActiveArea.geometry.coordinates[0][0]
@@ -513,13 +530,21 @@ async function defineUserActiveArea() {
     }
 
     if (turfCircle && unitedUserRegionsMultiPolygon) {
-        userActiveArea = turf.intersect(turfCircle, unitedUserRegionsMultiPolygon);
+        console.log("unitedUserRegionsMultiPolygon: ", unitedUserRegionsMultiPolygon)
+        // turf.intersect() cannot handle MultiPolygon in this turf version,
+        // and also fails on some simple polygons from the CSV data.
+        // Fall back to using the circle as the active area.
+        userActiveArea = turfCircle;
         createPolygonForTurf()
-        userActiveArea = turf.polygon([polygonForTurf]); // focus only on the first polygon
+        if (polygonForTurf) {
+            userActiveArea = turf.polygon([polygonForTurf]);
+        }
     } else if (turfCircle || unitedUserRegionsMultiPolygon) {
         userActiveArea = turfCircle || unitedUserRegionsMultiPolygon;
         createPolygonForTurf()
-        userActiveArea = turf.polygon([polygonForTurf]);
+        if (polygonForTurf) {
+            userActiveArea = turf.polygon([polygonForTurf]);
+        }
         console.log('userActiveArea', userActiveArea)
     }
 }
@@ -1099,9 +1124,11 @@ ymaps.ready(async function () {
     addCurvedCircle();
     defineGeodesicCirclePoints();
     //drawGeodesicCircle();
+
     await defineRegionsMultiPolygon();
     await defineUserActiveArea();
     addFogOnMap();
+
     addHome();
     findBounds();
     setBounds();
